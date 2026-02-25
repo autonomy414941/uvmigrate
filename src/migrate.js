@@ -241,9 +241,8 @@ function inspectProjectData(data) {
   if (poetry.packages) {
     blockers.push("tool.poetry.packages is not automatically converted.");
   }
-  if (poetry.plugins) {
-    blockers.push("tool.poetry.plugins is not automatically converted.");
-  }
+  const pluginInfo = normalizePlugins(poetry.plugins);
+  blockers.push(...pluginInfo.blockers);
   if (poetry.include || poetry.exclude) {
     warnings.push("tool.poetry include/exclude patterns require manual review.");
   }
@@ -301,6 +300,42 @@ function inspectProjectData(data) {
 
 function unique(values) {
   return [...new Set(values.filter(Boolean))];
+}
+
+function normalizePlugins(plugins) {
+  const entryPoints = {};
+  const blockers = [];
+
+  if (!plugins) {
+    return { entryPoints, blockers };
+  }
+
+  if (typeof plugins !== "object" || Array.isArray(plugins)) {
+    blockers.push("tool.poetry.plugins has invalid format.");
+    return { entryPoints, blockers };
+  }
+
+  for (const [groupName, group] of Object.entries(plugins)) {
+    if (!group || typeof group !== "object" || Array.isArray(group)) {
+      blockers.push(`Plugin group '${groupName}' has invalid format.`);
+      continue;
+    }
+
+    const normalizedGroup = {};
+    for (const [entryName, target] of Object.entries(group)) {
+      if (typeof target !== "string" || !target.trim()) {
+        blockers.push(`Plugin '${groupName}.${entryName}' has invalid target.`);
+        continue;
+      }
+      normalizedGroup[entryName] = target.trim();
+    }
+
+    if (Object.keys(normalizedGroup).length > 0) {
+      entryPoints[groupName] = normalizedGroup;
+    }
+  }
+
+  return { entryPoints, blockers };
 }
 
 function buildProjectTable(poetry) {
@@ -361,6 +396,11 @@ function buildProjectTable(poetry) {
 
   if (poetry.scripts && typeof poetry.scripts === "object") {
     project.scripts = poetry.scripts;
+  }
+
+  const pluginInfo = normalizePlugins(poetry.plugins);
+  if (Object.keys(pluginInfo.entryPoints).length > 0) {
+    project["entry-points"] = pluginInfo.entryPoints;
   }
 
   const urls = {};

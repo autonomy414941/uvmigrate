@@ -27,6 +27,9 @@ pytest = "^8.3.2"
 [tool.poetry.extras]
 speed = ["orjson"]
 
+[tool.poetry.plugins."pytest11"]
+demo = "demo.plugin"
+
 [[tool.poetry.source]]
 name = "corp"
 url = "https://packages.example.com/simple"
@@ -59,6 +62,10 @@ test("convert builds uv-compatible shape", () => {
     "orjson>=3.10.0,<4.0.0",
   ]);
 
+  assert.deepEqual(converted.project["entry-points"].pytest11, {
+    demo: "demo.plugin",
+  });
+
   assert.equal(converted.tool.uv.index[0].name, "corp");
   assert.equal(converted.tool.uv.index[0].explicit, true);
 });
@@ -78,4 +85,21 @@ privatepkg = {version = "^1.0", source = "company"}
   const inspection = inspectProjectData(broken);
   assert.ok(inspection.blockers.some((line) => line.includes("tool.poetry.packages")));
   assert.ok(inspection.blockers.some((line) => line.includes("privatepkg")));
+});
+
+test("inspect reports blockers for invalid plugin definitions", () => {
+  const broken = TOML.parse(`
+[tool.poetry]
+name = "broken-plugins"
+version = "0.1.0"
+
+[tool.poetry.dependencies]
+python = "^3.10"
+
+[tool.poetry.plugins]
+pytest11 = "not-a-table"
+`);
+
+  const inspection = inspectProjectData(broken);
+  assert.ok(inspection.blockers.some((line) => line.includes("Plugin group 'pytest11'")));
 });

@@ -51,6 +51,9 @@ version = "0.1.0"
 [tool.poetry.dependencies]
 python = "^3.11"
 requests = "2.32.3"
+
+[tool.poetry.plugins."pytest11"]
+demo = "demo.plugin"
 `,
     "utf8"
   );
@@ -69,4 +72,5 @@ requests = "2.32.3"
   const written = fs.readFileSync(output, "utf8");
   assert.match(written, /\[project\]/);
   assert.match(written, /requests==2\.32\.3/);
+  assert.match(written, /entry-points/);
 });
