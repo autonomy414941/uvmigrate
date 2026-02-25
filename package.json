@@ -1,0 +1,22 @@
+{
+  "name": "uvmigrate",
+  "version": "0.1.0",
+  "description": "Safe Poetry to uv migration inspector and converter",
+  "bin": {
+    "uvmigrate": "src/cli.js"
+  },
+  "scripts": {
+    "test": "node --test"
+  },
+  "keywords": [
+    "uv",
+    "poetry",
+    "migration",
+    "pyproject"
+  ],
+  "author": "",
+  "license": "MIT",
+  "dependencies": {
+    "@iarna/toml": "^2.2.5"
+  }
+}
