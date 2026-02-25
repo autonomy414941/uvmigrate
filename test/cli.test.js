@@ -51,9 +51,14 @@ version = "0.1.0"
 [tool.poetry.dependencies]
 python = "^3.11"
 requests = "2.32.3"
+internal-lib = {version = "^1.2.3", source = "corp"}
 
 [tool.poetry.plugins."pytest11"]
 demo = "demo.plugin"
+
+[[tool.poetry.source]]
+name = "corp"
+url = "https://packages.example.com/simple"
 `,
     "utf8"
   );
@@ -73,4 +78,6 @@ demo = "demo.plugin"
   assert.match(written, /\[project\]/);
   assert.match(written, /requests==2\.32\.3/);
   assert.match(written, /entry-points/);
+  assert.match(written, /\[tool\.uv\.sources\.internal-lib\]/);
+  assert.match(written, /index = "corp"/);
 });

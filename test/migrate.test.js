@@ -19,6 +19,7 @@ repository = "https://github.com/acme/demo"
 python = "^3.11"
 requests = "2.32.3"
 fastapi = {version = "^0.112.2", extras = ["all"]}
+internal-lib = {version = "^1.2.3", source = "corp"}
 orjson = {version = "^3.10.0", optional = true}
 
 [tool.poetry.group.dev.dependencies]
@@ -40,7 +41,7 @@ test("inspect detects poetry project without blockers", () => {
   const inspection = inspectProjectData(poetryProject);
   assert.equal(inspection.manager, "poetry");
   assert.equal(inspection.blockers.length, 0);
-  assert.equal(inspection.stats.dependencies, 3);
+  assert.equal(inspection.stats.dependencies, 4);
   assert.equal(inspection.stats.groups, 1);
 });
 
@@ -52,6 +53,7 @@ test("convert builds uv-compatible shape", () => {
   assert.deepEqual(converted.project.dependencies, [
     "requests==2.32.3",
     "fastapi[all]>=0.112.2,<0.113.0",
+    "internal-lib>=1.2.3,<2.0.0",
   ]);
 
   assert.deepEqual(converted["dependency-groups"].dev, [
@@ -68,6 +70,7 @@ test("convert builds uv-compatible shape", () => {
 
   assert.equal(converted.tool.uv.index[0].name, "corp");
   assert.equal(converted.tool.uv.index[0].explicit, true);
+  assert.deepEqual(converted.tool.uv.sources["internal-lib"], { index: "corp" });
 });
 
 test("inspect reports blockers for unsupported sections", () => {
@@ -84,7 +87,29 @@ privatepkg = {version = "^1.0", source = "company"}
 
   const inspection = inspectProjectData(broken);
   assert.ok(inspection.blockers.some((line) => line.includes("tool.poetry.packages")));
-  assert.ok(inspection.blockers.some((line) => line.includes("privatepkg")));
+  assert.ok(inspection.blockers.some((line) => line.includes("undefined source 'company'")));
+});
+
+test("convert maps source dependencies from dependency groups", () => {
+  const project = TOML.parse(`
+[tool.poetry]
+name = "group-source"
+version = "0.1.0"
+
+[tool.poetry.dependencies]
+python = "^3.11"
+
+[tool.poetry.group.dev.dependencies]
+internal-lint = {version = "^1.0.0", source = "corp"}
+
+[[tool.poetry.source]]
+name = "corp"
+url = "https://packages.example.com/simple"
+`);
+
+  const converted = convertProjectData(project);
+  assert.deepEqual(converted["dependency-groups"].dev, ["internal-lint>=1.0.0,<2.0.0"]);
+  assert.deepEqual(converted.tool.uv.sources["internal-lint"], { index: "corp" });
 });
 
 test("inspect reports blockers for invalid plugin definitions", () => {

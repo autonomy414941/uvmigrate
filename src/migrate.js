@@ -111,9 +111,61 @@ function makePythonMarker(spec) {
   return null;
 }
 
-function convertDependency(name, descriptor) {
+function normalizePoetrySources(sources) {
+  const names = new Set();
+  const indices = [];
+  const blockers = [];
+
+  if (!sources) {
+    return { names, indices, blockers };
+  }
+
+  if (!Array.isArray(sources)) {
+    blockers.push("tool.poetry.source has invalid format.");
+    return { names, indices, blockers };
+  }
+
+  for (const [idx, source] of sources.entries()) {
+    if (!source || typeof source !== "object" || Array.isArray(source)) {
+      blockers.push(`tool.poetry.source[${idx}] has invalid format.`);
+      continue;
+    }
+
+    const name = typeof source.name === "string" ? source.name.trim() : "";
+    if (!name) {
+      blockers.push(`tool.poetry.source[${idx}] is missing a valid name.`);
+      continue;
+    }
+
+    if (names.has(name)) {
+      blockers.push(`Duplicate poetry source name '${name}'.`);
+      continue;
+    }
+    names.add(name);
+
+    const url = typeof source.url === "string" ? source.url.trim() : "";
+    if (!url) {
+      blockers.push(`Poetry source '${name}' is missing a valid url.`);
+      continue;
+    }
+
+    const index = { name, url };
+    if (source.default === true) {
+      index.default = true;
+    }
+    if (source.priority === "explicit") {
+      index.explicit = true;
+    }
+    indices.push(index);
+  }
+
+  return { names, indices, blockers };
+}
+
+function convertDependency(name, descriptor, options = {}) {
   const warnings = [];
   const blockers = [];
+  const knownSources = options.knownSources || null;
 
   if (typeof descriptor === "string") {
     const parsed = convertPoetryConstraint(descriptor);
@@ -123,16 +175,25 @@ function convertDependency(name, descriptor) {
       optional: false,
       warnings,
       blockers,
+      uvSource: null,
     };
   }
 
   if (!descriptor || typeof descriptor !== "object") {
     blockers.push(`Dependency ${name} has unsupported format.`);
-    return { requirement: name, optional: false, warnings, blockers };
+    return { requirement: name, optional: false, warnings, blockers, uvSource: null };
   }
 
-  if (descriptor.source) {
-    blockers.push(`Dependency ${name} uses source='${descriptor.source}', which needs manual migration.`);
+  let uvSource = null;
+  if (descriptor.source !== undefined) {
+    const sourceName = typeof descriptor.source === "string" ? descriptor.source.trim() : "";
+    if (!sourceName) {
+      blockers.push(`Dependency ${name} has invalid source value.`);
+    } else if (knownSources && !knownSources.has(sourceName)) {
+      blockers.push(`Dependency ${name} references undefined source '${sourceName}'.`);
+    } else {
+      uvSource = { index: sourceName };
+    }
   }
 
   let requirementBase = name;
@@ -161,6 +222,7 @@ function convertDependency(name, descriptor) {
       optional: Boolean(descriptor.optional),
       warnings,
       blockers,
+      uvSource: null,
     };
   }
 
@@ -171,6 +233,7 @@ function convertDependency(name, descriptor) {
       optional: Boolean(descriptor.optional),
       warnings,
       blockers,
+      uvSource: null,
     };
   }
 
@@ -183,6 +246,7 @@ function convertDependency(name, descriptor) {
       optional: Boolean(descriptor.optional),
       warnings,
       blockers,
+      uvSource: null,
     };
   }
 
@@ -199,6 +263,7 @@ function convertDependency(name, descriptor) {
     optional: Boolean(descriptor.optional),
     warnings,
     blockers,
+    uvSource,
   };
 }
 
@@ -237,6 +302,8 @@ function inspectProjectData(data) {
   }
 
   const poetry = data.tool.poetry || {};
+  const sourceInfo = normalizePoetrySources(poetry.source);
+  blockers.push(...sourceInfo.blockers);
 
   if (poetry.packages) {
     blockers.push("tool.poetry.packages is not automatically converted.");
@@ -252,7 +319,7 @@ function inspectProjectData(data) {
   stats.dependencies = depEntries.length;
 
   for (const [name, descriptor] of depEntries) {
-    const converted = convertDependency(name, descriptor);
+    const converted = convertDependency(name, descriptor, { knownSources: sourceInfo.names });
     if (converted.optional) {
       stats.optionalDependencies += 1;
     }
@@ -273,7 +340,7 @@ function inspectProjectData(data) {
     }
     const groupDeps = groupConfig.dependencies || {};
     for (const [name, descriptor] of Object.entries(groupDeps)) {
-      const converted = convertDependency(name, descriptor);
+      const converted = convertDependency(name, descriptor, { knownSources: sourceInfo.names });
       blockers.push(...converted.blockers);
       warnings.push(...converted.warnings);
     }
@@ -338,11 +405,12 @@ function normalizePlugins(plugins) {
   return { entryPoints, blockers };
 }
 
-function buildProjectTable(poetry) {
+function buildProjectTable(poetry, options = {}) {
   const dependencies = poetry.dependencies || {};
   const entries = Object.entries(dependencies).filter(([name]) => name !== "python");
 
   const project = {};
+  const uvSources = {};
   if (poetry.name) project.name = poetry.name;
   if (poetry.version) project.version = poetry.version;
   if (poetry.description) project.description = poetry.description;
@@ -367,7 +435,10 @@ function buildProjectTable(poetry) {
   const optionalLookup = {};
 
   for (const [name, descriptor] of entries) {
-    const converted = convertDependency(name, descriptor);
+    const converted = convertDependency(name, descriptor, options);
+    if (converted.uvSource) {
+      uvSources[name] = converted.uvSource;
+    }
     if (converted.optional) {
       optionalLookup[name] = converted.requirement;
       continue;
@@ -411,16 +482,20 @@ function buildProjectTable(poetry) {
     project.urls = urls;
   }
 
-  return project;
+  return { project, uvSources };
 }
 
-function buildDependencyGroups(poetry) {
+function buildDependencyGroups(poetry, options = {}) {
   const groups = {};
+  const uvSources = {};
 
   if (poetry["dev-dependencies"] && typeof poetry["dev-dependencies"] === "object") {
     const items = [];
     for (const [name, descriptor] of Object.entries(poetry["dev-dependencies"])) {
-      const converted = convertDependency(name, descriptor);
+      const converted = convertDependency(name, descriptor, options);
+      if (converted.uvSource) {
+        uvSources[name] = converted.uvSource;
+      }
       items.push(converted.requirement);
     }
     if (items.length > 0) {
@@ -433,7 +508,10 @@ function buildDependencyGroups(poetry) {
       const deps = groupConfig?.dependencies || {};
       const items = [];
       for (const [name, descriptor] of Object.entries(deps)) {
-        const converted = convertDependency(name, descriptor);
+        const converted = convertDependency(name, descriptor, options);
+        if (converted.uvSource) {
+          uvSources[name] = converted.uvSource;
+        }
         items.push(converted.requirement);
       }
       if (items.length > 0) {
@@ -442,43 +520,22 @@ function buildDependencyGroups(poetry) {
     }
   }
 
-  return groups;
-}
-
-function buildUvIndices(poetry) {
-  const sources = poetry.source;
-  if (!Array.isArray(sources) || sources.length === 0) {
-    return [];
-  }
-
-  return sources
-    .filter((source) => source && source.name && source.url)
-    .map((source) => {
-      const index = {
-        name: source.name,
-        url: source.url,
-      };
-      if (source.default === true) {
-        index.default = true;
-      }
-      if (source.priority === "explicit") {
-        index.explicit = true;
-      }
-      return index;
-    });
+  return { groups, uvSources };
 }
 
 function convertProjectData(data) {
   const poetry = data.tool.poetry;
-  const project = buildProjectTable(poetry);
-  const dependencyGroups = buildDependencyGroups(poetry);
-  const uvIndices = buildUvIndices(poetry);
+  const sourceInfo = normalizePoetrySources(poetry.source);
+  const convertOptions = { knownSources: sourceInfo.names };
+  const projectInfo = buildProjectTable(poetry, convertOptions);
+  const groupInfo = buildDependencyGroups(poetry, convertOptions);
+  const uvIndices = sourceInfo.indices;
 
   const output = {};
-  output.project = project;
+  output.project = projectInfo.project;
 
-  if (Object.keys(dependencyGroups).length > 0) {
-    output["dependency-groups"] = dependencyGroups;
+  if (Object.keys(groupInfo.groups).length > 0) {
+    output["dependency-groups"] = groupInfo.groups;
   }
 
   output["build-system"] = {
@@ -490,8 +547,16 @@ function convertProjectData(data) {
   delete tool.poetry;
 
   const uvTool = { ...(tool.uv || {}) };
+  const generatedSources = { ...projectInfo.uvSources, ...groupInfo.uvSources };
+  const existingSources =
+    uvTool.sources && typeof uvTool.sources === "object" && !Array.isArray(uvTool.sources)
+      ? uvTool.sources
+      : {};
   if (uvIndices.length > 0) {
     uvTool.index = uvIndices;
+  }
+  if (Object.keys(generatedSources).length > 0) {
+    uvTool.sources = { ...existingSources, ...generatedSources };
   }
   if (Object.keys(uvTool).length > 0) {
     tool.uv = uvTool;
