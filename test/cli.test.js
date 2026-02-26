@@ -81,3 +81,85 @@ url = "https://packages.example.com/simple"
   assert.match(written, /\[tool\.uv\.sources\.internal-lib\]/);
   assert.match(written, /index = "corp"/);
 });
+
+test("convert --check fails when output file is missing", () => {
+  const dir = makeTempDir();
+  const pyproject = path.join(dir, "pyproject.toml");
+  const output = path.join(dir, "pyproject.uv.toml");
+
+  fs.writeFileSync(
+    pyproject,
+    `
+[tool.poetry]
+name = "demo"
+version = "0.1.0"
+
+[tool.poetry.dependencies]
+python = "^3.11"
+requests = "2.32.3"
+`,
+    "utf8"
+  );
+
+  const result = spawnSync(
+    process.execPath,
+    [cliPath, "convert", pyproject, "--output", output, "--check"],
+    {
+      encoding: "utf8",
+    }
+  );
+
+  assert.equal(result.status, 1);
+  assert.match(result.stderr, /does not exist/);
+});
+
+test("convert --check reports out-of-date output and passes when synced", () => {
+  const dir = makeTempDir();
+  const pyproject = path.join(dir, "pyproject.toml");
+  const output = path.join(dir, "pyproject.uv.toml");
+
+  fs.writeFileSync(
+    pyproject,
+    `
+[tool.poetry]
+name = "demo"
+version = "0.1.0"
+
+[tool.poetry.dependencies]
+python = "^3.11"
+requests = "2.32.3"
+`,
+    "utf8"
+  );
+
+  fs.writeFileSync(output, "stale", "utf8");
+
+  const firstCheck = spawnSync(
+    process.execPath,
+    [cliPath, "convert", pyproject, "--output", output, "--check"],
+    {
+      encoding: "utf8",
+    }
+  );
+  assert.equal(firstCheck.status, 1);
+  assert.match(firstCheck.stderr, /out of date/);
+
+  const convert = spawnSync(
+    process.execPath,
+    [cliPath, "convert", pyproject, "--output", output],
+    {
+      encoding: "utf8",
+    }
+  );
+  assert.equal(convert.status, 0);
+
+  const secondCheck = spawnSync(
+    process.execPath,
+    [cliPath, "convert", pyproject, "--output", output, "--check"],
+    {
+      encoding: "utf8",
+    }
+  );
+  assert.equal(secondCheck.status, 0);
+  assert.match(secondCheck.stderr, /up to date/);
+});

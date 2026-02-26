@@ -16,11 +16,12 @@ function usage() {
 
 Usage:
   uvmigrate inspect [pyproject-path] [--check] [--json]
-  uvmigrate convert [pyproject-path] [--output <path>] [--write] [--force] [--report <path>]
+  uvmigrate convert [pyproject-path] [--output <path>] [--write] [--force] [--report <path>] [--check]
 
 Examples:
   uvmigrate inspect pyproject.toml --check
   uvmigrate convert pyproject.toml --output pyproject.uv.toml --report migration.txt
+  uvmigrate convert pyproject.toml --output pyproject.uv.toml --check
   uvmigrate convert pyproject.toml --write --force`);
 }
 
@@ -113,6 +114,10 @@ function runConvert(options) {
   const targetPath = path.resolve(options.path);
   const { parsed, inspection } = loadInspection(targetPath);
 
+  if (options.check && options.write) {
+    throw new Error("--check cannot be used with --write");
+  }
+
   if (inspection.blockers.length > 0 && !options.force) {
     console.error(formatInspectionReport(targetPath, inspection));
     console.error("\nConversion aborted: blockers found. Re-run with --force to proceed anyway.");
@@ -125,6 +130,29 @@ function runConvert(options) {
 
   if (options.report) {
     fs.writeFileSync(options.report, formatInspectionReport(targetPath, inspection), "utf8");
+  }
+
+  if (options.check) {
+    if (!options.output) {
+      throw new Error("convert --check requires --output <path>");
+    }
+
+    const outputPath = path.resolve(options.output);
+    if (!fs.existsSync(outputPath)) {
+      console.error(`Check failed: ${outputPath} does not exist.`);
+      process.exitCode = 1;
+      return;
+    }
+
+    const existing = fs.readFileSync(outputPath, "utf8");
+    if (existing !== tomlOutput) {
+      console.error(`Check failed: ${outputPath} is out of date.`);
+      process.exitCode = 1;
+      return;
+    }
+
+    console.error(`Check passed: ${outputPath} is up to date.`);
+    return;
   }
 
   if (!options.write && !options.output) {
