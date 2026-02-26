@@ -62,7 +62,7 @@ Exit codes:
 
 - `tool.poetry` metadata -> `project`
 - `tool.poetry.dependencies` -> `project.dependencies`
-- optional dependencies + extras -> `project.optional-dependencies`
+- optional dependencies + extras -> `project.optional-dependencies` (orphan optional deps become same-name extras)
 - dependency groups -> `dependency-groups`
 - Poetry plugin tables -> `project.entry-points`
 - Poetry sources + source-linked dependencies -> `tool.uv.index` + `tool.uv.sources`
@@ -79,6 +79,7 @@ Exit codes:
 - `tool.poetry.packages` (manual review required)
 - invalid plugin structures
 - dependencies that reference undefined sources
+- optional dependencies that are not listed in `tool.poetry.extras` (warns and maps to same-name extras)
 
 ## Development
 

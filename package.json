@@ -1,6 +1,6 @@
 {
   "name": "uvmigrate",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "description": "Safe Poetry-to-uv migration CLI with blocker detection and CI checks",
   "bin": {
     "uvmigrate": "src/cli.js"

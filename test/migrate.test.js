@@ -112,6 +112,23 @@ url = "https://packages.example.com/simple"
   assert.deepEqual(converted.tool.uv.sources["internal-lint"], { index: "corp" });
 });
 
+test("convert preserves orphan optional dependencies as same-name extras", () => {
+  const project = TOML.parse(`
+[tool.poetry]
+name = "orphan-optional"
+version = "0.1.0"
+
+[tool.poetry.dependencies]
+python = "^3.11"
+orjson = {version = "^3.10.0", optional = true}
+`);
+
+  const converted = convertProjectData(project);
+  assert.deepEqual(converted.project["optional-dependencies"], {
+    orjson: ["orjson>=3.10.0,<4.0.0"],
+  });
+});
+
 test("inspect reports blockers for invalid plugin definitions", () => {
   const broken = TOML.parse(`
 [tool.poetry]
@@ -127,4 +144,23 @@ pytest11 = "not-a-table"
 
   const inspection = inspectProjectData(broken);
   assert.ok(inspection.blockers.some((line) => line.includes("Plugin group 'pytest11'")));
+});
+
+test("inspect warns about optional dependencies missing from extras", () => {
+  const project = TOML.parse(`
+[tool.poetry]
+name = "optional-warning"
+version = "0.1.0"
+
+[tool.poetry.dependencies]
+python = "^3.11"
+orjson = {version = "^3.10.0", optional = true}
+`);
+
+  const inspection = inspectProjectData(project);
+  assert.ok(
+    inspection.warnings.some((line) =>
+      line.includes("Optional dependencies not referenced by tool.poetry.extras")
+    )
+  );
 });

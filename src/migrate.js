@@ -162,6 +162,32 @@ function normalizePoetrySources(sources) {
   return { names, indices, blockers };
 }
 
+function normalizeExtraPackageName(value) {
+  if (typeof value !== "string") {
+    return null;
+  }
+  const trimmed = value.trim();
+  return trimmed || null;
+}
+
+function collectExtraReferences(extras) {
+  const refs = new Set();
+  if (!extras || typeof extras !== "object" || Array.isArray(extras)) {
+    return refs;
+  }
+
+  for (const packages of Object.values(extras)) {
+    for (const packageRef of packages || []) {
+      const packageName = normalizeExtraPackageName(packageRef);
+      if (packageName) {
+        refs.add(packageName);
+      }
+    }
+  }
+
+  return refs;
+}
+
 function convertDependency(name, descriptor, options = {}) {
   const warnings = [];
   const blockers = [];
@@ -317,10 +343,12 @@ function inspectProjectData(data) {
   const dependencies = poetry.dependencies || {};
   const depEntries = Object.entries(dependencies).filter(([name]) => name !== "python");
   stats.dependencies = depEntries.length;
+  const optionalDependencyNames = [];
 
   for (const [name, descriptor] of depEntries) {
     const converted = convertDependency(name, descriptor, { knownSources: sourceInfo.names });
     if (converted.optional) {
+      optionalDependencyNames.push(name);
       stats.optionalDependencies += 1;
     }
     blockers.push(...converted.blockers);
@@ -353,6 +381,13 @@ function inspectProjectData(data) {
   }
 
   const extras = poetry.extras || {};
+  const extraRefs = collectExtraReferences(extras);
+  const orphanOptional = optionalDependencyNames.filter((name) => !extraRefs.has(name));
+  if (orphanOptional.length > 0) {
+    warnings.push(
+      `Optional dependencies not referenced by tool.poetry.extras will be mapped to same-name extras: ${orphanOptional.join(", ")}.`
+    );
+  }
   if (Object.keys(extras).length > 0 && stats.optionalDependencies === 0) {
     warnings.push("tool.poetry.extras is set but no optional dependencies were detected.");
   }
@@ -452,15 +487,39 @@ function buildProjectTable(poetry, options = {}) {
 
   const optionalDependencies = {};
   const extras = poetry.extras || {};
+  const referencedOptional = new Set();
   for (const [extraName, packages] of Object.entries(extras)) {
     const values = [];
-    for (const packageName of packages || []) {
-      values.push(optionalLookup[packageName] || packageName);
+    for (const packageRef of packages || []) {
+      const packageName = normalizeExtraPackageName(packageRef);
+      if (!packageName) {
+        continue;
+      }
+      if (Object.prototype.hasOwnProperty.call(optionalLookup, packageName)) {
+        referencedOptional.add(packageName);
+        values.push(optionalLookup[packageName]);
+        continue;
+      }
+      values.push(packageName);
     }
     if (values.length > 0) {
       optionalDependencies[extraName] = values;
     }
   }
+
+  for (const [packageName, requirement] of Object.entries(optionalLookup)) {
+    if (referencedOptional.has(packageName)) {
+      continue;
+    }
+    if (optionalDependencies[packageName]) {
+      if (!optionalDependencies[packageName].includes(requirement)) {
+        optionalDependencies[packageName].push(requirement);
+      }
+      continue;
+    }
+    optionalDependencies[packageName] = [requirement];
+  }
+
   if (Object.keys(optionalDependencies).length > 0) {
     project["optional-dependencies"] = optionalDependencies;
   }
